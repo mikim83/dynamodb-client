@@ -15,7 +15,11 @@ import (
 )
 
 // fakeAPI is a table "events" of n items: id (N) and score = (id*7) % n.
-type fakeAPI struct{ n int }
+// With timeCol set, each item also has that attribute, equal to score.
+type fakeAPI struct {
+	n       int
+	timeCol string
+}
 
 func (f fakeAPI) ListTables(context.Context, *dynamodb.ListTablesInput, ...func(*dynamodb.Options)) (*dynamodb.ListTablesOutput, error) {
 	return &dynamodb.ListTablesOutput{TableNames: []string{"events"}}, nil
@@ -38,10 +42,14 @@ func (f fakeAPI) Scan(_ context.Context, in *dynamodb.ScanInput, _ ...func(*dyna
 	end := min(start+int(aws.ToInt32(in.Limit)), f.n)
 	out := &dynamodb.ScanOutput{}
 	for i := start; i < end; i++ {
-		out.Items = append(out.Items, ddb.Item{
+		item := ddb.Item{
 			"id":    &types.AttributeValueMemberN{Value: strconv.Itoa(i)},
 			"score": &types.AttributeValueMemberN{Value: strconv.Itoa(i * 7 % f.n)},
-		})
+		}
+		if f.timeCol != "" {
+			item[f.timeCol] = item["score"]
+		}
+		out.Items = append(out.Items, item)
 	}
 	if end < f.n {
 		out.LastEvaluatedKey = ddb.Item{"id": &types.AttributeValueMemberN{Value: strconv.Itoa(end - 1)}}
@@ -277,5 +285,59 @@ func TestDeleteInLoadAllMode(t *testing.T) {
 	tm = drive(t, tm, keyMsg("y"))
 	if m := tm.(Model); len(m.items.all) != 119 || ids(m) != "1,2,3" {
 		t.Fatalf("all=%d ids=%s", len(m.items.all), ids(m))
+	}
+}
+
+func TestDefaultSortNewestFirstLoadsAll(t *testing.T) {
+	m := openWith(t, Options{API: fakeAPI{n: 120, timeCol: "createdAt"}, AutoSort: true})
+	if !m.items.allMode || len(m.items.all) != 120 {
+		t.Fatalf("should load the whole table: all=%v items=%d", m.items.allMode, len(m.items.all))
+	}
+	if m.items.sortCol != "createdAt" || !m.items.sortDesc || ddb.Display(m.items.rows[0]["createdAt"]) != "119" {
+		t.Fatalf("sort=%q desc=%v first=%s", m.items.sortCol, m.items.sortDesc, ddb.Display(m.items.rows[0]["createdAt"]))
+	}
+	if m.items.note != "Loaded all 120 items, sorted by createdAt ▼." {
+		t.Fatalf("note=%q", m.items.note)
+	}
+}
+
+func TestDefaultSortTooBigSortsPage(t *testing.T) {
+	m := openWith(t, Options{API: fakeAPI{n: 120, timeCol: "created_at"}, AutoSort: true, MaxItems: 100})
+	if m.items.allMode || m.items.sortCol != "created_at" || !m.items.sortDesc {
+		t.Fatalf("all=%v sort=%q desc=%v", m.items.allMode, m.items.sortCol, m.items.sortDesc)
+	}
+	if !strings.Contains(m.items.note, "this page only") {
+		t.Fatalf("note=%q", m.items.note)
+	}
+	if len(m.items.rows) != 50 || ddb.Display(m.items.rows[0]["created_at"]) != "119" {
+		t.Fatalf("page sort: rows=%d first=%s", len(m.items.rows), ddb.Display(m.items.rows[0]["created_at"]))
+	}
+}
+
+func TestDefaultSortNoTimeColumn(t *testing.T) {
+	m := openWith(t, Options{API: fakeAPI{n: 120}, AutoSort: true})
+	if m.items.allMode || m.items.sortCol != "" || firstID(m) != "0" {
+		t.Fatalf("all=%v sort=%q first=%s", m.items.allMode, m.items.sortCol, firstID(m))
+	}
+}
+
+func TestSortByFlag(t *testing.T) {
+	m := openWith(t, Options{API: fakeAPI{n: 120, timeCol: "createdAt"}, SortBy: "score"})
+	if m.items.sortCol != "score" || !m.items.allMode {
+		t.Fatalf("sort=%q all=%v", m.items.sortCol, m.items.allMode)
+	}
+	// --sort-by= (empty, not auto) turns the default sort off.
+	m = openWith(t, Options{API: fakeAPI{n: 120, timeCol: "createdAt"}})
+	if m.items.sortCol != "" || m.items.allMode {
+		t.Fatalf("sort=%q all=%v", m.items.sortCol, m.items.allMode)
+	}
+}
+
+func TestReloadKeepsLoadAll(t *testing.T) {
+	var tm tea.Model = openWith(t, Options{API: fakeAPI{n: 120, timeCol: "createdAt"}, AutoSort: true})
+	tm = drive(t, tm, keyMsg("r"))
+	m := tm.(Model)
+	if !m.items.allMode || len(m.items.all) != 120 || ddb.Display(m.items.rows[0]["createdAt"]) != "119" {
+		t.Fatalf("all=%v items=%d", m.items.allMode, len(m.items.all))
 	}
 }

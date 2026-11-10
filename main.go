@@ -35,9 +35,16 @@ func run() error {
 		pageSize    = flag.Int("page-size", 50, "rows per page")
 		maxItems    = flag.Int("max-items", 10000, "maximum items read by \"load all\"")
 		edit        = flag.Bool("edit", false, "allow deleting items (default: read-only)")
+		sortBy      = flag.String("sort-by", "", "attribute to sort tables by, newest first (default: guess one such as createdAt; --sort-by= turns it off)")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
+	autoSort := true
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "sort-by" {
+			autoSort = false
+		}
+	})
 	if *showVersion {
 		fmt.Println("dynamodb-client", version)
 		return nil
@@ -85,6 +92,8 @@ func run() error {
 			PageSize: *pageSize,
 			MaxItems: *maxItems,
 			Table:    *table,
+			SortBy:   *sortBy,
+			AutoSort: autoSort,
 		})
 		if err != nil {
 			return err

@@ -68,9 +68,12 @@ func (s *itemsState) setAll(items []ddb.Item, truncated bool, cap int) {
 	s.allMode, s.allRaw, s.truncated = true, items, truncated
 	s.page, s.rowSel, s.rowOffset = 0, 0, 0
 	s.refresh()
-	if truncated {
+	switch {
+	case truncated:
 		s.note = fmt.Sprintf("Loaded the first %d items only (--max-items).", cap)
-	} else {
+	case s.sortCol != "":
+		s.note = fmt.Sprintf("Loaded all %d items, sorted by %s %s.", len(items), s.sortCol, s.sortArrow())
+	default:
 		s.note = fmt.Sprintf("Loaded all %d items: sorting now applies to the whole table.", len(items))
 	}
 }
@@ -223,10 +226,7 @@ func (s *itemsState) status() string {
 			fmt.Sprintf("~%d items", s.info.ItemCount))
 	}
 	if s.sortCol != "" {
-		dir := "▲"
-		if s.sortDesc {
-			dir = "▼"
-		}
+		dir := s.sortArrow()
 		scope := "this page"
 		if s.allMode {
 			scope = "all loaded"
@@ -234,6 +234,13 @@ func (s *itemsState) status() string {
 		parts = append(parts, fmt.Sprintf("sort %s %s (%s)", s.sortCol, dir, scope))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func (s *itemsState) sortArrow() string {
+	if s.sortDesc {
+		return "▼"
+	}
+	return "▲"
 }
 
 func (s *itemsState) colWidths() []int {
@@ -302,11 +309,7 @@ func (s *itemsState) render(width, height int) string {
 	for j, i := range vis {
 		name := s.columns[i]
 		if name == s.sortCol {
-			if s.sortDesc {
-				name += " ▼"
-			} else {
-				name += " ▲"
-			}
+			name += " " + s.sortArrow()
 		}
 		cell := fit(name, widths[i])
 		if i == s.colSel {

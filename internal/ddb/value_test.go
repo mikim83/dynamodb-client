@@ -80,3 +80,22 @@ func TestCompareMixedTypes(t *testing.T) {
 		t.Fatal("strings sort lexicographically")
 	}
 }
+
+func TestGuessTimeColumn(t *testing.T) {
+	cases := []struct {
+		cols []string
+		want string
+	}{
+		{[]string{"id", "name"}, ""},
+		{[]string{"id", "Created_At", "updatedAt"}, "Created_At"},
+		{[]string{"id", "updatedAt", "timestamp"}, "timestamp"},
+		{[]string{"pk", "sk", "lastModified"}, "lastModified"},
+		{[]string{"pk", "TS"}, "TS"},
+		{[]string{"pk", "created-on"}, "created-on"},
+	}
+	for _, c := range cases {
+		if got := GuessTimeColumn(c.cols); got != c.want {
+			t.Errorf("%v: got %q, want %q", c.cols, got, c.want)
+		}
+	}
+}

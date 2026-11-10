@@ -10,6 +10,8 @@ already configured in `~/.aws`. Read-only unless you start it with `--edit`.
   (with an MFA prompt if the role needs it), SSO (`aws sso login`),
   `credential_process`, environment variables and instance roles.
 - Paged scan (50 rows per page by default), with fast forward/back paging.
+- Opens tables newest first when it can tell which attribute holds the date
+  (`createdAt`, `timestamp`…), or the one you name with `--sort-by`.
 - Sort by any column. The current page is sorted at once; press `a` to load
   the whole table and sort it globally.
 - Read-only by default: it only calls `ListTables`, `DescribeTable` and
@@ -50,6 +52,7 @@ dynamodb-client --profile dev --edit     # allow deleting items
 | `--page-size` | `50` | Rows per page (1–1000). |
 | `--max-items` | `10000` | Cap for "load all". |
 | `--edit` | off | Allow deleting items. Without it the session is read-only. |
+| `--sort-by` | guessed | Attribute to open every table sorted by, newest first. `--sort-by=` turns the default order off. |
 | `--version` | | Print the version. |
 
 ## Keys
@@ -70,7 +73,7 @@ dynamodb-client --profile dev --edit     # allow deleting items
 | `a` | load the whole table (up to `--max-items`) so sorting and paging cover all of it |
 | `enter` | show the item as JSON |
 | `d` | delete the selected item (only with `--edit`; also from the JSON view) |
-| `r` | reload from the first page |
+| `r` | reload: the first page, or the whole table again if it was loaded with `a` |
 | `esc` | back |
 | `?` | all keys |
 
@@ -83,6 +86,21 @@ reorders the rows of the page on screen (the status bar says
 covers every item and the pages are slices of the sorted result (*all
 loaded*). Items without the sorted attribute always go last. Numbers are
 compared numerically.
+
+### Default order: newest first
+
+DynamoDB keeps no insertion time and `Scan` returns items in no particular
+order, so "newest first" needs an attribute holding the date. When a table
+opens, the client looks for one on the first page by name — `createdAt`,
+`created_at`, `creationDate`, `timestamp`, `ts`, `date`, then `updatedAt`
+and similar, ignoring case, `_` and `-` — and sorts by it, descending.
+`--sort-by <attr>` names it instead, for every table; `--sort-by=` turns
+this off. ISO 8601 strings and epoch numbers both sort correctly.
+
+Sorting the first page alone would not give the newest items, so when the
+table's item count fits in `--max-items` the whole table is loaded first
+(as with `a`). Bigger tables open paged with only the page sorted, and the
+status bar says so; press `a` to load up to `--max-items`.
 
 The item count shown is `DescribeTable`'s, which DynamoDB refreshes about
 every six hours, so it is approximate.

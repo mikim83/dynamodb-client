@@ -30,6 +30,8 @@ type Options struct {
 	PageSize int
 	MaxItems int    // cap for "load all"
 	Table    string // open this table straight away
+	SortBy   string // sort every table by this attribute, newest first
+	AutoSort bool   // guess SortBy per table from a date-like name
 }
 
 // Result tells the caller what to do once the UI exits.
@@ -190,6 +192,29 @@ func (m Model) deleteItem(item ddb.Item) tea.Cmd {
 	}
 }
 
+// defaultSort orders a table just opened from newest to oldest. Scan order
+// is arbitrary, so newest first means sorting the whole table: it is loaded
+// when it fits in --max-items, otherwise only the page is sorted.
+func (m Model) defaultSort() (tea.Model, tea.Cmd) {
+	it := &m.items
+	col := m.opt.SortBy
+	if m.opt.AutoSort {
+		col = ddb.GuessTimeColumn(it.columns)
+	}
+	if col == "" {
+		return m, nil
+	}
+	it.sortCol, it.sortDesc = col, true
+	it.refresh()
+	if it.info.ItemCount > int64(m.opt.MaxItems) {
+		it.note = fmt.Sprintf("Newest first on this page only: ~%d items is over --max-items %d. Press a to load that many.",
+			it.info.ItemCount, m.opt.MaxItems)
+		return m, nil
+	}
+	m.loading = fmt.Sprintf("Loading all items to sort by %s, newest first…", col)
+	return m, m.loadAll()
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
@@ -239,6 +264,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.items = newItemsState(msg.info, msg.pager)
 			m.items.showPage(msg.page)
 			m.screen = scrItems
+			return m.defaultSort()
 		}
 		return m, nil
 
@@ -394,7 +420,12 @@ func (m Model) updateItems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadAll()
 		}
 	case key.Matches(msg, m.keys.Reload):
+		wasAll := it.allMode
 		it.reset()
+		if wasAll {
+			m.loading = fmt.Sprintf("Reloading up to %d items…", m.opt.MaxItems)
+			return m, m.loadAll()
+		}
 		m.loading = "Reloading…"
 		return m, fetchPage(it.pager, 0)
 	case key.Matches(msg, m.keys.Open):
