@@ -11,6 +11,7 @@ type keyMap struct {
 	LoadAll             key.Binding
 	Open, Back          key.Binding
 	Reload, Profile     key.Binding
+	Delete              key.Binding
 	Help, Quit          key.Binding
 }
 
@@ -31,6 +32,7 @@ func newKeyMap() keyMap {
 		Back:      key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Reload:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
 		Profile:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "switch profile")),
+		Delete:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:      key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
@@ -40,12 +42,12 @@ func newKeyMap() keyMap {
 type itemsHelp struct{ k keyMap }
 
 func (h itemsHelp) ShortHelp() []key.Binding {
-	return []key.Binding{h.k.NextPage, h.k.PrevPage, h.k.NextCol, h.k.Sort, h.k.Open, h.k.Back, h.k.Help}
+	return []key.Binding{h.k.NextPage, h.k.PrevPage, h.k.NextCol, h.k.Sort, h.k.Open, h.k.Delete, h.k.Back, h.k.Help}
 }
 
 func (h itemsHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.k.Up, h.k.Down, h.k.Open, h.k.Back},
+		{h.k.Up, h.k.Down, h.k.Open, h.k.Delete, h.k.Back},
 		{h.k.NextPage, h.k.PrevPage, h.k.FirstPage, h.k.LastPage},
 		{h.k.NextCol, h.k.PrevCol, h.k.Sort, h.k.ClearSort},
 		{h.k.LoadAll, h.k.Reload, h.k.Profile, h.k.Quit},

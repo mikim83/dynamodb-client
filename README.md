@@ -1,7 +1,7 @@
 # dynamodb-client
 
-A read-only terminal UI to browse Amazon DynamoDB tables, using the profiles
-and roles already configured in `~/.aws`.
+A terminal UI to browse Amazon DynamoDB tables, using the profiles and roles
+already configured in `~/.aws`. Read-only unless you start it with `--edit`.
 
 - One static binary for Linux, macOS and Windows (amd64 and arm64). Nothing
   else to install.
@@ -12,7 +12,9 @@ and roles already configured in `~/.aws`.
 - Paged scan (50 rows per page by default), with fast forward/back paging.
 - Sort by any column. The current page is sorted at once; press `a` to load
   the whole table and sort it globally.
-- Never writes: it only calls `ListTables`, `DescribeTable` and `Scan`.
+- Read-only by default: it only calls `ListTables`, `DescribeTable` and
+  `Scan`. With `--edit` it can also delete items, one at a time and after
+  confirmation.
 
 ## Install
 
@@ -36,6 +38,7 @@ dynamodb-client                          # pick a profile, then a table
 dynamodb-client --profile prod           # or AWS_PROFILE=prod dynamodb-client
 dynamodb-client --profile prod --table orders
 dynamodb-client --endpoint-url http://localhost:8000 --region us-east-1   # DynamoDB Local
+dynamodb-client --profile dev --edit     # allow deleting items
 ```
 
 | Flag | Default | |
@@ -46,6 +49,7 @@ dynamodb-client --endpoint-url http://localhost:8000 --region us-east-1   # Dyna
 | `--table` | | Open this table directly. |
 | `--page-size` | `50` | Rows per page (1–1000). |
 | `--max-items` | `10000` | Cap for "load all". |
+| `--edit` | off | Allow deleting items. Without it the session is read-only. |
 | `--version` | | Print the version. |
 
 ## Keys
@@ -65,6 +69,7 @@ dynamodb-client --endpoint-url http://localhost:8000 --region us-east-1   # Dyna
 | `S` | clear the sort |
 | `a` | load the whole table (up to `--max-items`) so sorting and paging cover all of it |
 | `enter` | show the item as JSON |
+| `d` | delete the selected item (only with `--edit`; also from the JSON view) |
 | `r` | reload from the first page |
 | `esc` | back |
 | `?` | all keys |
@@ -82,6 +87,18 @@ compared numerically.
 The item count shown is `DescribeTable`'s, which DynamoDB refreshes about
 every six hours, so it is approximate.
 
+### Deleting items
+
+Start with `--edit`; the status bar then shows **EDIT**. Select a row and
+press `d`: the status bar asks for confirmation and only `y` deletes, any
+other key cancels. The item is deleted by its primary key with a condition
+that it still exists, so if someone else deleted it first you are told so
+instead of getting a silent success. The row disappears from the view
+without re-reading the table.
+
+Pages are a snapshot: rows added or changed by others after a page was read
+show up after `r` (reload).
+
 ## Permissions
 
 The identity needs only:
@@ -94,8 +111,9 @@ The identity needs only:
 }
 ```
 
-Scope `DescribeTable` and `Scan` to specific table ARNs if you prefer;
-`ListTables` does not support resource-level permissions.
+With `--edit`, it also needs `dynamodb:DeleteItem`. Scope `DescribeTable`,
+`Scan` and `DeleteItem` to specific table ARNs if you prefer; `ListTables`
+does not support resource-level permissions.
 
 ## Development
 

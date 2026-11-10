@@ -1,9 +1,11 @@
 // Package ui is the terminal interface: a table list, a paged item view with
-// sorting and an item detail view. It never writes to DynamoDB.
+// sorting and an item detail view. It writes to DynamoDB only to delete an
+// item, and only when it is given a Deleter (--edit).
 package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -22,7 +24,8 @@ const callTimeout = 60 * time.Second
 // Options configure a session against one account and region.
 type Options struct {
 	API      ddb.API
-	Profile  string // shown in the status bar only
+	Deleter  ddb.Deleter // nil keeps the session read-only
+	Profile  string      // shown in the status bar only
 	Region   string
 	PageSize int
 	MaxItems int    // cap for "load all"
@@ -68,6 +71,10 @@ type (
 		truncated bool
 		err       error
 	}
+	deleteMsg struct {
+		item ddb.Item
+		err  error
+	}
 )
 
 // Model is the root Bubble Tea model.
@@ -85,6 +92,7 @@ type Model struct {
 
 	loading string
 	err     error
+	confirm ddb.Item // row waiting for the user to confirm its deletion
 	result  Result
 }
 
@@ -105,9 +113,12 @@ func New(opt Options) Model {
 	l.KeyMap.Quit.SetEnabled(false)
 	l.SetStatusBarItemName("table", "tables")
 
+	keys := newKeyMap()
+	keys.Delete.SetEnabled(opt.Deleter != nil)
+
 	return Model{
 		opt:     opt,
-		keys:    newKeyMap(),
+		keys:    keys,
 		help:    help.New(),
 		tables:  l,
 		detail:  viewport.New(0, 0),
@@ -167,6 +178,15 @@ func (m Model) loadAll() tea.Cmd {
 		defer cancel()
 		items, truncated, err := ddb.ScanAll(ctx, api, table, max)
 		return allMsg{items, truncated, err}
+	}
+}
+
+func (m Model) deleteItem(item ddb.Item) tea.Cmd {
+	d, info := m.opt.Deleter, m.items.info
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		return deleteMsg{item, ddb.DeleteItem(ctx, d, info, item)}
 	}
 }
 
@@ -241,12 +261,39 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case deleteMsg:
+		m.loading = ""
+		label := keyLabel(msg.item, m.items.info.Keys())
+		switch {
+		case errors.Is(msg.err, ddb.ErrGone):
+			m.items.remove(msg.item)
+			m.items.note = "Already deleted by someone else: " + label
+		case msg.err != nil:
+			m.err = msg.err
+			return m, nil
+		default:
+			m.items.remove(msg.item)
+			m.items.note = "Deleted " + label
+		}
+		m.screen = scrItems
+		return m, nil
+
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.Quit) && msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
 		if m.loading != "" {
 			return m, nil // one call at a time
+		}
+		if m.confirm != nil {
+			item := m.confirm
+			m.confirm = nil
+			if msg.String() != "y" {
+				m.items.note = "Delete cancelled."
+				return m, nil
+			}
+			m.loading = "Deleting " + keyLabel(item, m.items.info.Keys()) + "…"
+			return m, m.deleteItem(item)
 		}
 		switch m.screen {
 		case scrTables:
@@ -356,6 +403,8 @@ func (m Model) updateItems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detail.GotoTop()
 			m.screen = scrDetail
 		}
+	case key.Matches(msg, m.keys.Delete):
+		m.confirm, _ = it.selected()
 	}
 	return m, nil
 }
@@ -366,6 +415,9 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		m.screen = scrItems
+		return m, nil
+	case key.Matches(msg, m.keys.Delete):
+		m.confirm, _ = m.items.selected()
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -387,9 +439,13 @@ func (m Model) View() string {
 			m.help.View(itemsHelp{m.keys})
 	case scrDetail:
 		row, _ := m.items.selected()
+		hint := "↑/↓ scroll · esc back · q quit"
+		if m.keys.Delete.Enabled() {
+			hint = "↑/↓ scroll · d delete · esc back · q quit"
+		}
 		body = titleStyle.Render(m.items.info.Name+" · "+keyLabel(row, m.items.info.Keys())) + "\n" +
 			m.detail.View() + "\n" +
-			dimStyle.Render("↑/↓ scroll · esc back · q quit")
+			dimStyle.Render(hint)
 	}
 	return body + "\n" + m.statusLine()
 }
@@ -399,17 +455,23 @@ func (m Model) statusLine() string {
 	if m.opt.Profile != "" {
 		ctx = m.opt.Profile + " · " + ctx
 	}
+	ctx = dimStyle.Render(ctx + " · ")
+	if m.opt.Deleter != nil {
+		ctx = errStyle.Render("EDIT") + dimStyle.Render(" · ") + ctx
+	}
 	switch {
+	case m.confirm != nil:
+		return errStyle.Render("Delete " + keyLabel(m.confirm, m.items.info.Keys()) + "? y to confirm, any other key cancels")
 	case m.loading != "":
-		return dimStyle.Render(ctx+" · ") + noteStyle.Render(m.loading)
+		return ctx + noteStyle.Render(m.loading)
 	case m.err != nil:
 		return errStyle.Render(oneLine(m.err.Error()))
 	case m.screen != scrTables && m.items.note != "":
-		return dimStyle.Render(ctx+" · ") + noteStyle.Render(m.items.note)
+		return ctx + noteStyle.Render(m.items.note)
 	case m.screen == scrTables:
-		return dimStyle.Render(ctx + " · enter open · / filter · r reload · P profile · q quit")
+		return ctx + dimStyle.Render("enter open · / filter · r reload · P profile · q quit")
 	default:
-		return dimStyle.Render(ctx + " · " + m.items.status())
+		return ctx + dimStyle.Render(m.items.status())
 	}
 }
 
