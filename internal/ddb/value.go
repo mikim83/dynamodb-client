@@ -135,6 +135,33 @@ func Columns(items []Item, keys []string) []string {
 	return append(cols, rest...)
 }
 
+// timeNames are attribute names that usually hold when an item was created
+// or changed, best first. They are compared ignoring case, "_" and "-".
+var timeNames = []string{
+	"createdat", "createdon", "createddate", "createdtime", "creationdate", "creationtime",
+	"created", "insertedat", "timestamp", "ts", "eventtime", "datetime", "date", "time",
+	"updatedat", "modifiedat", "lastmodified", "lastupdated", "updated",
+}
+
+// GuessTimeColumn returns the column that most likely holds the item's
+// creation time, or "" if none looks like one. DynamoDB keeps no insertion
+// time of its own, so a name is all there is to go by.
+func GuessTimeColumn(columns []string) string {
+	norm := map[string]string{}
+	for _, c := range columns {
+		n := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(c))
+		if _, dup := norm[n]; !dup {
+			norm[n] = c
+		}
+	}
+	for _, name := range timeNames {
+		if c, ok := norm[name]; ok {
+			return c
+		}
+	}
+	return ""
+}
+
 // typeRank orders values of different types: numbers, strings, booleans,
 // binary, then sets, lists and maps (compared by their text).
 func typeRank(av types.AttributeValue) int {
