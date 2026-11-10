@@ -128,6 +128,18 @@ func (s *itemsState) refresh() {
 	s.clampRow()
 }
 
+// remove drops a deleted item from the view and from the pager's cache, so
+// coming back to this page does not show it again.
+func (s *itemsState) remove(item ddb.Item) {
+	if s.allMode {
+		s.allRaw = ddb.Without(s.allRaw, s.info, item)
+	} else {
+		s.raw = ddb.Without(s.raw, s.info, item)
+		s.pager.Remove(s.page, s.info, item)
+	}
+	s.refresh()
+}
+
 func (s *itemsState) slicePage() {
 	from := min(s.page*s.size(), len(s.all))
 	to := min(from+s.size(), len(s.all))

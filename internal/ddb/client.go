@@ -1,5 +1,6 @@
-// Package ddb wraps the read-only DynamoDB calls the client needs: listing
-// tables, describing them and scanning them page by page.
+// Package ddb wraps the DynamoDB calls the client needs: listing
+// tables, describing them, scanning them page by page and, with --edit,
+// deleting items.
 package ddb
 
 import (
@@ -117,6 +118,20 @@ func (p *Pager) Reset() {
 	defer p.mu.Unlock()
 	p.starts = []Item{nil}
 	p.cache = map[int]Page{}
+}
+
+// Remove drops a deleted item from the cached page i. The start keys of the
+// following pages stay valid: DynamoDB accepts the key of a deleted item as
+// ExclusiveStartKey.
+func (p *Pager) Remove(i int, info TableInfo, item Item) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pg, ok := p.cache[i]
+	if !ok {
+		return
+	}
+	pg.Items = Without(pg.Items, info, item)
+	p.cache[i] = pg
 }
 
 // Page returns page i. Pages are reached in order: page i+1 can be read once

@@ -1,5 +1,6 @@
-// Command dynamodb-client is a read-only terminal UI to browse DynamoDB
-// tables with the profiles and roles configured in ~/.aws.
+// Command dynamodb-client is a terminal UI to browse DynamoDB tables with the
+// profiles and roles configured in ~/.aws. It is read-only unless started
+// with --edit, which allows deleting items.
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"github.com/mikim83/dynamodb-client/internal/awsconfig"
+	"github.com/mikim83/dynamodb-client/internal/ddb"
 	"github.com/mikim83/dynamodb-client/internal/ui"
 )
 
@@ -32,6 +34,7 @@ func run() error {
 		table       = flag.String("table", "", "open this table directly")
 		pageSize    = flag.Int("page-size", 50, "rows per page")
 		maxItems    = flag.Int("max-items", 10000, "maximum items read by \"load all\"")
+		edit        = flag.Bool("edit", false, "allow deleting items (default: read-only)")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -70,8 +73,13 @@ func run() error {
 			}
 		})
 
+		var deleter ddb.Deleter
+		if *edit {
+			deleter = api
+		}
 		res, err := ui.Run(ui.Options{
 			API:      api,
+			Deleter:  deleter,
 			Profile:  current,
 			Region:   cfg.Region,
 			PageSize: *pageSize,
